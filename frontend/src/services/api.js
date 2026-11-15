@@ -19,7 +19,8 @@ async function request(endpoint, options = {}) {
       let errMessage = `HTTP Error ${res.status}`;
       try {
         const errorJson = await res.json();
-        if (errorJson.error) errMessage = errorJson.error;
+        if (errorJson.message) errMessage = errorJson.message;
+        else if (errorJson.error) errMessage = errorJson.error;
       } catch (e) {
         // Response wasn't JSON
       }
@@ -64,6 +65,8 @@ export const api = {
     method: 'PUT', 
     body: JSON.stringify({ status }) 
   }),
+  rechargeDrone: (id) => request(`/drones/${id}/recharge`, { method: 'PUT' }),
+  rechargeAllDrones: () => request('/drones/recharge-all', { method: 'POST' }),
 
   // Resources
   getResources: () => request('/resources'),
@@ -84,8 +87,10 @@ export const api = {
 
   // Deliveries
   getDeliveries: () => request('/deliveries'),
+  createDelivery: (data) => request('/deliveries', { method: 'POST', body: JSON.stringify(data) }),
   startDelivery: (id) => request('/deliveries/start', { method: 'POST', body: JSON.stringify({ deliveryId: id }) }),
   completeDelivery: (id) => request('/deliveries/complete', { method: 'POST', body: JSON.stringify({ deliveryId: id }) }),
+  cancelDelivery: (id) => request('/deliveries/cancel', { method: 'POST', body: JSON.stringify({ deliveryId: id }) }),
   getHistory: () => request('/history'),
 
   // Reports & System

@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { api } from '../services/api';
 
-export default function DeliveryManagement() {
+export default function DeliveryManagement({ onNavigate }) {
   const [deliveries, setDeliveries] = useState([]);
   const [requests, setRequests] = useState([]);
   const [drones, setDrones] = useState([]);
@@ -29,6 +29,7 @@ export default function DeliveryManagement() {
   const [selectedRequestId, setSelectedRequestId] = useState('');
   const [selectedDroneId, setSelectedDroneId] = useState('');
   const [planError, setFormError] = useState('');
+  const [submittingPlan, setSubmittingPlan] = useState(false);
   const [notification, setNotification] = useState(null);
 
   const loadData = async () => {
@@ -40,14 +41,19 @@ export default function DeliveryManagement() {
         api.getDrones(),
         api.getLocations()
       ]);
-      setDeliveries(delList || []);
-      setRequests(reqList || []);
+      const safeDeliveries = delList || [];
+      const safeRequests = reqList || [];
+      setDeliveries(safeDeliveries);
+      setRequests(safeRequests);
       setDrones(droneList || []);
       setLocations(locList || []);
 
-      const pendingReqs = (reqList || []).filter((r) => r.status === 'PENDING');
-      if (pendingReqs.length > 0 && !selectedRequestId) {
-        setSelectedRequestId(pendingReqs[0].id);
+      const activeReqIds = new Set(safeDeliveries.map((d) => d.requestId));
+      const unassigned = safeRequests.filter(
+        (r) => (r.status === 'PENDING' || r.status === 'ASSIGNED') && !activeReqIds.has(r.id)
+      );
+      if (unassigned.length > 0) {
+        setSelectedRequestId(unassigned[0].id);
       }
     } catch (err) {
       showToast('Error loading active missions: ' + err.message, 'error');
@@ -60,6 +66,17 @@ export default function DeliveryManagement() {
     loadData();
   }, []);
 
+  // Listen for Escape key to close modal
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setShowPlanModal(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   const showToast = (message, type = 'success') => {
     setNotification({ message, type });
     setTimeout(() => setNotification(null), 4000);
@@ -69,7 +86,7 @@ export default function DeliveryManagement() {
     try {
       await api.startDelivery(id);
       showToast(`Mission ${id} dispatched! Drone is now IN_FLIGHT.`);
-      loadData();
+      await loadData();
     } catch (err) {
       showToast('Failed to start mission: ' + err.message, 'error');
     }
@@ -80,7 +97,7 @@ export default function DeliveryManagement() {
     try {
       await api.completeDelivery(id);
       showToast(`Mission ${id} successfully completed! Assets updated & saved to history.`);
-      loadData();
+      await loadData();
     } catch (err) {
       showToast('Failed to complete delivery: ' + err.message, 'error');
     }
@@ -89,38 +106,48 @@ export default function DeliveryManagement() {
   const handleCancelDelivery = async (id) => {
     if (!window.confirm(`Are you sure you want to cancel delivery mission ${id}? Reserved drone and inventory will be restored.`)) return;
     try {
-      await fetch('http://localhost:8080/api/deliveries/cancel', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ deliveryId: id })
-      });
+      await api.cancelDelivery(id);
       showToast(`Mission ${id} cancelled. Assets restored.`);
-      loadData();
+      await loadData();
     } catch (err) {
       showToast('Failed to cancel delivery: ' + err.message, 'error');
     }
   };
 
+  const handleOpenPlanModal = () => {
+    setFormError('');
+    const activeReqIds = new Set((deliveries || []).map((d) => d.requestId));
+    const eligible = (requests || []).filter(
+      (r) => (r.status === 'PENDING' || r.status === 'ASSIGNED') && !activeReqIds.has(r.id)
+    );
+    if (eligible.length > 0) {
+      if (!selectedRequestId || !eligible.some((r) => r.id === selectedRequestId)) {
+        setSelectedRequestId(eligible[0].id);
+      }
+    }
+    setShowPlanModal(true);
+  };
+
   const handlePlanSubmit = async (e) => {
     e.preventDefault();
     if (!selectedRequestId) {
-      setFormError('Please select a pending relief request.');
+      setFormError('Please select an unfulfilled relief request.');
       return;
     }
+    setSubmittingPlan(true);
+    setFormError('');
     try {
-      await fetch('http://localhost:8080/api/deliveries', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          requestId: selectedRequestId,
-          droneId: selectedDroneId || null
-        })
+      await api.createDelivery({
+        requestId: selectedRequestId,
+        droneId: selectedDroneId || null
       });
       setShowPlanModal(false);
       showToast('New delivery mission planned with Dijkstra shortest route!');
-      loadData();
+      await loadData();
     } catch (err) {
-      setFormError(err.message);
+      setFormError(err.message || 'Failed to create delivery mission');
+    } finally {
+      setSubmittingPlan(false);
     }
   };
 
@@ -134,7 +161,10 @@ export default function DeliveryManagement() {
     return d ? `${d.name} (${id})` : id;
   };
 
-  const pendingRequests = requests.filter((r) => r.status === 'PENDING');
+  const activeDeliveryReqIds = new Set((deliveries || []).map((d) => d.requestId));
+  const eligibleRequests = (requests || []).filter(
+    (r) => (r.status === 'PENDING' || r.status === 'ASSIGNED') && !activeDeliveryReqIds.has(r.id)
+  );
   const availableDrones = drones.filter((d) => d.status === 'AVAILABLE');
 
   return (
@@ -168,17 +198,24 @@ export default function DeliveryManagement() {
             Control mission dispatch, simulate drone transit, complete deliveries, and deduct inventory.
           </p>
         </div>
-        <button
-          className="btn btn-primary"
-          onClick={() => {
-            setFormError('');
-            setShowPlanModal(true);
-          }}
-          disabled={pendingRequests.length === 0}
-        >
-          <Plus size={16} />
-          <span>Plan New Delivery Mission</span>
-        </button>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <button
+            className="btn btn-secondary"
+            onClick={loadData}
+            disabled={loading}
+            title="Refresh active delivery missions"
+          >
+            <RotateCw size={15} className={loading ? 'spin' : ''} />
+            <span>Refresh</span>
+          </button>
+          <button
+            className="btn btn-primary"
+            onClick={handleOpenPlanModal}
+          >
+            <Plus size={16} />
+            <span>Plan New Delivery Mission</span>
+          </button>
+        </div>
       </div>
 
       {/* Active Deliveries Table */}
@@ -200,7 +237,9 @@ export default function DeliveryManagement() {
             <Truck size={36} color="#94a3b8" style={{ margin: '0 auto 12px' }} />
             <p style={{ fontWeight: 600, color: '#334155' }}>No Active Deliveries in Progress</p>
             <p style={{ fontSize: '0.82rem' }}>
-              {pendingRequests.length > 0 ? 'Click "Plan New Delivery Mission" above to dispatch available drones.' : 'All relief requests have been satisfied.'}
+              {eligibleRequests.length > 0
+                ? 'Click "Plan New Delivery Mission" above to schedule missions for waiting relief requests.'
+                : 'All relief requests have been satisfied or dispatched. Assign drones in Relief Requests to create new missions.'}
             </p>
           </div>
         ) : (
@@ -298,75 +337,180 @@ export default function DeliveryManagement() {
 
       {/* Plan New Delivery Modal */}
       {showPlanModal && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '16px' }}>
-          <div style={{ backgroundColor: 'white', borderRadius: '12px', width: '100%', maxWidth: '520px', padding: '24px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <h3 style={{ fontSize: '1.15rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <div
+          onClick={() => setShowPlanModal(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.65)',
+            backdropFilter: 'blur(3px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: '16px'
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              backgroundColor: 'white',
+              borderRadius: '14px',
+              width: '100%',
+              maxWidth: '540px',
+              maxHeight: '88vh',
+              display: 'flex',
+              flexDirection: 'column',
+              boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
+              border: '1px solid #e2e8f0',
+              overflow: 'hidden'
+            }}
+          >
+            {/* Modal Header - Fixed */}
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '16px 24px',
+                borderBottom: '1px solid #e2e8f0',
+                backgroundColor: '#ffffff',
+                flexShrink: 0
+              }}
+            >
+              <h3 style={{ fontSize: '1.15rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
                 <Truck size={20} color="#2563eb" /> Plan Relief Delivery Mission
               </h3>
-              <button onClick={() => setShowPlanModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
-                <X size={18} />
+              <button
+                type="button"
+                onClick={() => setShowPlanModal(false)}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  border: '1px solid #cbd5e1',
+                  background: '#f8fafc',
+                  cursor: 'pointer',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  color: '#475569'
+                }}
+              >
+                <X size={16} />
+                <span>Close</span>
               </button>
             </div>
 
-            {planError && (
-              <div style={{ backgroundColor: '#fee2e2', color: '#991b1b', padding: '8px 12px', borderRadius: '6px', fontSize: '0.82rem', marginBottom: '14px' }}>
-                {planError}
+            {/* Modal Body - Scrollable */}
+            <div style={{ padding: '20px 24px', overflowY: 'auto', flex: 1 }}>
+              {planError && (
+                <div style={{ backgroundColor: '#fee2e2', color: '#991b1b', padding: '10px 14px', borderRadius: '6px', fontSize: '0.84rem', marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <AlertTriangle size={16} color="#dc2626" />
+                  <span>{planError}</span>
+                </div>
+              )}
+
+              {eligibleRequests.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '28px 12px' }}>
+                  <CheckCircle2 size={44} color="#16a34a" style={{ margin: '0 auto 12px' }} />
+                  <h4 style={{ fontSize: '1.05rem', fontWeight: 700, color: '#1e293b', marginBottom: '8px' }}>
+                    All Relief Requests Have Active Missions
+                  </h4>
+                  <p style={{ color: '#64748b', fontSize: '0.84rem', lineHeight: 1.5, marginBottom: '20px' }}>
+                    There are no unassigned requests waiting for delivery planning. All existing requests are either currently in flight, pending dispatch, or fulfilled.
+                  </p>
+                  <div style={{ display: 'flex', justifyContent: 'center', gap: '10px' }}>
+                    <button type="button" className="btn btn-secondary" onClick={() => setShowPlanModal(false)}>
+                      Close
+                    </button>
+                    {onNavigate && (
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        onClick={() => {
+                          setShowPlanModal(false);
+                          onNavigate('requests');
+                        }}
+                      >
+                        <span>Create New Relief Request &rarr;</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <form id="plan-delivery-form" onSubmit={handlePlanSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  <div>
+                    <label style={{ fontSize: '0.8rem', fontWeight: 600, color: '#334155', display: 'block', marginBottom: '4px' }}>
+                      Select Unfulfilled Relief Request *
+                    </label>
+                    <select
+                      required
+                      value={selectedRequestId}
+                      onChange={(e) => setSelectedRequestId(e.target.value)}
+                      style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                    >
+                      {eligibleRequests.map((req) => (
+                        <option key={req.id} value={req.id}>
+                          {req.id} – {getLocationName(req.locationId)} ({req.quantity} units, {req.urgency}, Status: {req.status})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: '0.8rem', fontWeight: 600, color: '#334155', display: 'block', marginBottom: '4px' }}>
+                      Select Drone (or Auto-Allocate Best Fit)
+                    </label>
+                    <select
+                      value={selectedDroneId}
+                      onChange={(e) => setSelectedDroneId(e.target.value)}
+                      style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                    >
+                      <option value="">Auto-Allocate (Least Excess Capacity)</option>
+                      {availableDrones.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.id} – {d.name} ({d.maxCapacityKg}kg cap, {d.batteryPercentage}% bat)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div style={{ backgroundColor: '#f8fafc', padding: '12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.8rem', color: '#475569' }}>
+                    <strong>Automated Workflow on Creation:</strong>
+                    <ul style={{ paddingLeft: '18px', marginTop: '4px', lineHeight: 1.6 }}>
+                      <li>Calculates shortest route via Java <strong>Dijkstra Algorithm</strong></li>
+                      <li>Calculates cost: Base ₹100 + Distance ₹20/km + Emergency ₹50</li>
+                      <li>Transitions Drone &amp; Request status to <code>ASSIGNED</code></li>
+                      <li>Reserves inventory supplies atomically</li>
+                    </ul>
+                  </div>
+                </form>
+              )}
+            </div>
+
+            {/* Modal Footer - Fixed */}
+            {eligibleRequests.length > 0 && (
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  gap: '10px',
+                  padding: '14px 24px',
+                  borderTop: '1px solid #e2e8f0',
+                  backgroundColor: '#f8fafc',
+                  flexShrink: 0
+                }}
+              >
+                <button type="button" className="btn btn-secondary" onClick={() => setShowPlanModal(false)} disabled={submittingPlan}>
+                  Cancel
+                </button>
+                <button type="submit" form="plan-delivery-form" className="btn btn-primary" disabled={submittingPlan}>
+                  {submittingPlan ? 'Planning Mission...' : 'Create Mission Record'}
+                </button>
               </div>
             )}
-
-            <form onSubmit={handlePlanSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600, color: '#334155', display: 'block', marginBottom: '4px' }}>
-                  Select Pending Relief Request *
-                </label>
-                <select
-                  required
-                  value={selectedRequestId}
-                  onChange={(e) => setSelectedRequestId(e.target.value)}
-                  style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
-                >
-                  {pendingRequests.map((req) => (
-                    <option key={req.id} value={req.id}>
-                      {req.id} – {getLocationName(req.locationId)} ({req.quantity} units, {req.urgency})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600, color: '#334155', display: 'block', marginBottom: '4px' }}>
-                  Select Drone (or Auto-Allocate Best Fit)
-                </label>
-                <select
-                  value={selectedDroneId}
-                  onChange={(e) => setSelectedDroneId(e.target.value)}
-                  style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
-                >
-                  <option value="">Auto-Allocate (Least Excess Capacity)</option>
-                  {availableDrones.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.id} – {d.name} ({d.maxCapacityKg}kg cap, {d.batteryPercentage}% bat)
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div style={{ backgroundColor: '#f8fafc', padding: '12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.8rem', color: '#475569' }}>
-                <strong>Automated Workflow on Creation:</strong>
-                <ul style={{ paddingLeft: '18px', marginTop: '4px', lineHeight: 1.6 }}>
-                  <li>Calculates shortest route via Java <strong>Dijkstra Algorithm</strong></li>
-                  <li>Calculates cost: Base ₹100 + Distance ₹20/km + Emergency ₹50</li>
-                  <li>Sets Drone &amp; Request status to <code>ASSIGNED</code></li>
-                  <li>Reserves inventory supplies atomically</li>
-                </ul>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' }}>
-                <button type="button" className="btn btn-secondary" onClick={() => setShowPlanModal(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary">Create Mission Record</button>
-              </div>
-            </form>
           </div>
         </div>
       )}

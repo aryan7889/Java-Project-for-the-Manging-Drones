@@ -9,7 +9,9 @@ import org.rescuedrone.model.*;
 import org.rescuedrone.model.enums.*;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Service managing the complete lifecycle of disaster relief delivery operations:
@@ -41,40 +43,74 @@ public class DeliveryService {
             throw new IllegalArgumentException("Cannot create delivery for request with status: " + request.getStatus());
         }
 
+        DeliveryManager dm = system.getDeliveryManager();
+
+        // Check if an active delivery already exists for this request (idempotent guard)
+        for (Delivery d : dm.getActiveDeliveries()) {
+            if (d.getRequestId().equalsIgnoreCase(requestId)) {
+                return d;
+            }
+        }
+
         Drone drone;
+        boolean stockAlreadyAllocated = (request.getStatus() == RequestStatus.ASSIGNED);
+
         if (droneId != null && !droneId.trim().isEmpty()) {
             drone = system.getDroneManager().getById(droneId.trim());
             if (drone == null) {
                 throw new IllegalArgumentException("Drone not found with ID: " + droneId);
             }
+        } else if (request.getStatus() == RequestStatus.ASSIGNED) {
+            // Request was already assigned - look for the assigned drone or an available one
+            Set<String> activeDroneIds = new HashSet<>();
+            for (Delivery d : dm.getActiveDeliveries()) {
+                activeDroneIds.add(d.getDroneId());
+            }
+            Drone foundDrone = null;
+            for (Drone d : system.getDroneManager().getAll()) {
+                if (d.getStatus() == DroneStatus.ASSIGNED && !activeDroneIds.contains(d.getId())) {
+                    foundDrone = d;
+                    break;
+                }
+            }
+            if (foundDrone == null) {
+                for (Drone d : system.getDroneManager().getAll()) {
+                    if (d.getStatus() == DroneStatus.AVAILABLE) {
+                        foundDrone = d;
+                        break;
+                    }
+                }
+            }
+            if (foundDrone == null) {
+                throw new IllegalStateException("No available or assigned drone found for request " + requestId);
+            }
+            drone = foundDrone;
         } else {
-            // Auto-allocate drone via DroneAllocator
+            // Auto-allocate drone via DroneAllocator (Request is PENDING)
             AllocationResult allocRes = DroneAllocator.evaluateAndAssign(requestId, 10.0);
             if (!allocRes.isSuccess()) {
                 throw new IllegalStateException("Auto drone allocation failed: " + allocRes.getMessage());
             }
             drone = allocRes.getSelectedDrone();
+            stockAlreadyAllocated = true; // DroneAllocator reserves inventory during evaluateAndAssign
         }
 
-        String sourceLocId = drone.getCurrentLocationId() != null ? drone.getCurrentLocationId() : "LOC-001";
+        String sourceLocId = drone.getCurrentLocationId() != null && !drone.getCurrentLocationId().isEmpty()
+                ? drone.getCurrentLocationId() : "LOC-001";
         String destLocId = request.getLocationId();
 
         // Build live graph and compute Dijkstra shortest path
-        List<String> vertexIds = new ArrayList<>();
-        for (Location loc : system.getLocationManager().getAll()) {
-            vertexIds.add(loc.getId());
-        }
-        Graph graph = system.getRouteManager().toGraph(vertexIds);
+        Graph graph = system.getRouteManager().buildGraph();
 
         PathResult pathResult = DijkstraOptimizer.findShortestPath(graph, sourceLocId, destLocId);
-        double distanceKm = pathResult.isFound() ? pathResult.getTotalDistanceKm() : 10.0;
-        List<String> pathNodes = pathResult.isFound() ? pathResult.getPathNodeIds() : List.of(sourceLocId, destLocId);
+        double distanceKm = (pathResult != null && pathResult.isFound()) ? pathResult.getTotalDistanceKm() : 10.0;
+        List<String> pathNodes = (pathResult != null && pathResult.isFound() && pathResult.getPathNodeIds() != null && !pathResult.getPathNodeIds().isEmpty())
+                ? pathResult.getPathNodeIds() : List.of(sourceLocId, destLocId);
 
         // Calculate delivery cost
         CostCalculator.CostBreakdown cost = CostCalculator.calculateCost(distanceKm, request.getUrgency());
 
         // Generate delivery ID
-        DeliveryManager dm = system.getDeliveryManager();
         String id = "DEL-" + String.format("%04d", dm.size() + 1);
         int counter = 1;
         while (dm.exists(id)) {
@@ -99,10 +135,65 @@ public class DeliveryService {
         request.setStatus(RequestStatus.ASSIGNED);
         system.getRequestManager().update(request);
 
-        // Reserve stock only if custom drone was provided (DroneAllocator already reserves for auto-allocation)
-        if (droneId != null && !droneId.trim().isEmpty()) {
+        // Reserve stock if not already reserved
+        if (!stockAlreadyAllocated) {
             system.getResourceManager().allocateStock(request.getResourceId(), request.getQuantity());
         }
+
+        dm.add(delivery);
+        return delivery;
+    }
+
+    /**
+     * Creates and registers a Delivery mission record for a request and drone
+     * that were just successfully paired by the allocation engine.
+     */
+    public synchronized Delivery createDeliveryForAssignedRequest(ReliefRequest request, Drone drone, double precomputedDistanceKm) {
+        if (request == null || drone == null) return null;
+
+        ReliefSystem system = ReliefSystem.getInstance();
+        DeliveryManager dm = system.getDeliveryManager();
+
+        // Check if an active delivery already exists for this request
+        for (Delivery d : dm.getActiveDeliveries()) {
+            if (d.getRequestId().equalsIgnoreCase(request.getId())) {
+                return d;
+            }
+        }
+
+        String sourceLocId = drone.getCurrentLocationId() != null && !drone.getCurrentLocationId().isEmpty()
+                ? drone.getCurrentLocationId() : "LOC-001";
+        String destLocId = request.getLocationId();
+
+        // Build live graph and compute Dijkstra shortest path
+        Graph graph = system.getRouteManager().buildGraph();
+        PathResult pathResult = DijkstraOptimizer.findShortestPath(graph, sourceLocId, destLocId);
+
+        double distanceKm = (pathResult != null && pathResult.isFound()) ? pathResult.getTotalDistanceKm() :
+                (precomputedDistanceKm > 0 ? precomputedDistanceKm : 10.0);
+        List<String> pathNodes = (pathResult != null && pathResult.isFound() && pathResult.getPathNodeIds() != null && !pathResult.getPathNodeIds().isEmpty())
+                ? pathResult.getPathNodeIds() : List.of(sourceLocId, destLocId);
+
+        // Calculate delivery cost
+        CostCalculator.CostBreakdown cost = CostCalculator.calculateCost(distanceKm, request.getUrgency());
+
+        // Generate delivery ID
+        String id = "DEL-" + String.format("%04d", dm.size() + 1);
+        int counter = 1;
+        while (dm.exists(id)) {
+            id = "DEL-" + String.format("%04d", dm.size() + counter++);
+        }
+
+        Delivery delivery = new Delivery(
+                id,
+                request.getId(),
+                drone.getId(),
+                sourceLocId,
+                destLocId,
+                pathNodes,
+                distanceKm,
+                cost.getTotalCost()
+        );
 
         dm.add(delivery);
         return delivery;

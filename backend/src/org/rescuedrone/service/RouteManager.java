@@ -69,6 +69,17 @@ public class RouteManager extends BaseManager<Route> {
     }
 
     /**
+     * Builds and returns a live Graph instance populated with all locations currently registered in the system.
+     */
+    public synchronized org.rescuedrone.ds.Graph buildGraph() {
+        List<String> vertexIds = new ArrayList<>();
+        for (org.rescuedrone.model.Location loc : ReliefSystem.getInstance().getLocationManager().getAll()) {
+            vertexIds.add(loc.getId());
+        }
+        return toGraph(vertexIds);
+    }
+
+    /**
      * Builds and returns a live Graph instance populated with given vertices and all route corridors.
      */
     public synchronized org.rescuedrone.ds.Graph toGraph(List<String> vertexIds) {

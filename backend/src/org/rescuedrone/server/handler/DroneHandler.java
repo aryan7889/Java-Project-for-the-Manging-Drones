@@ -32,13 +32,17 @@ public class DroneHandler implements HttpHandler {
             if ("GET".equalsIgnoreCase(method)) {
                 handleGet(exchange, path);
             } else if ("POST".equalsIgnoreCase(method)) {
-                if (path.endsWith("/assign")) {
+                if (path.endsWith("/recharge-all")) {
+                    handleRechargeAll(exchange);
+                } else if (path.endsWith("/assign")) {
                     handleAssign(exchange);
                 } else {
                     handlePost(exchange);
                 }
             } else if ("PUT".equalsIgnoreCase(method)) {
-                if (path.endsWith("/recharge")) {
+                if (path.endsWith("/recharge-all")) {
+                    handleRechargeAll(exchange);
+                } else if (path.endsWith("/recharge")) {
                     handleRecharge(exchange, path);
                 } else {
                     handlePut(exchange, path);
@@ -198,6 +202,15 @@ public class DroneHandler implements HttpHandler {
         }
     }
 
+    private void handleRechargeAll(HttpExchange exchange) throws IOException {
+        int count = ReliefSystem.getInstance().getDroneManager().rechargeAll();
+        Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("success", true);
+        resp.put("rechargedCount", count);
+        resp.put("message", "All fleet drones recharged to 100% and restored to AVAILABLE status.");
+        CorsHandler.sendJsonResponse(exchange, 200, resp);
+    }
+
     private void handleAssign(HttpExchange exchange) throws IOException {
         String body = CorsHandler.readRequestBody(exchange);
         Map<String, Object> data = JsonUtil.parseJsonObject(body);
@@ -209,7 +222,14 @@ public class DroneHandler implements HttpHandler {
         }
 
         DroneAllocator.AllocationResult result = DroneAllocator.evaluateAndAssign(requestId, distance);
-        int statusCode = result.isSuccess() ? 200 : 400;
-        CorsHandler.sendJsonResponse(exchange, statusCode, result);
+        if (result.isSuccess() && result.getSelectedDrone() != null) {
+            try {
+                org.rescuedrone.service.DeliveryService.getInstance().createDeliveryForAssignedRequest(
+                        result.getRequest(), result.getSelectedDrone(), result.getFlightDistanceKm());
+            } catch (Exception ex) {
+                System.err.println("[DroneHandler] Error auto-creating delivery record: " + ex.getMessage());
+            }
+        }
+        CorsHandler.sendJsonResponse(exchange, 200, result);
     }
 }

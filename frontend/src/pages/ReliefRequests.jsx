@@ -75,6 +75,18 @@ export default function ReliefRequests({ onNavigate }) {
     loadData();
   }, []);
 
+  // Listen for Escape key to cleanly dismiss any open dialogs
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setShowAssignModal(false);
+        setShowAddModal(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   const showToast = (message, type = 'success') => {
     setNotification({ message, type });
     setTimeout(() => setNotification(null), 4000);
@@ -88,10 +100,35 @@ export default function ReliefRequests({ onNavigate }) {
     try {
       const res = await api.assignDrone(req.id);
       setAssignResult(res);
-      showToast('Drone assigned successfully!');
-      loadData();
+      if (res && res.success) {
+        showToast(`Drone ${res.selectedDrone ? res.selectedDrone.name : ''} successfully assigned to ${req.id}!`);
+        loadData();
+      } else {
+        showToast(res.message || 'No suitable drone available for allocation', 'error');
+      }
     } catch (err) {
       setAssignResult({ success: false, message: err.message });
+      showToast(err.message, 'error');
+    } finally {
+      setAssignLoading(false);
+    }
+  };
+
+  const handleRechargeAndRetry = async () => {
+    setAssignLoading(true);
+    try {
+      await api.rechargeAllDrones();
+      showToast('All fleet drones recharged to 100% and restored to AVAILABLE!');
+      if (assigningRequest) {
+        const res = await api.assignDrone(assigningRequest.id);
+        setAssignResult(res);
+        if (res && res.success) {
+          showToast(`Drone ${res.selectedDrone ? res.selectedDrone.name : ''} assigned successfully!`);
+          loadData();
+        }
+      }
+    } catch (err) {
+      showToast('Recharge failed: ' + err.message, 'error');
     } finally {
       setAssignLoading(false);
     }
@@ -482,14 +519,57 @@ export default function ReliefRequests({ onNavigate }) {
 
       {/* New Relief Request Modal */}
       {showAddModal && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '16px' }}>
-          <div style={{ backgroundColor: 'white', borderRadius: '12px', width: '100%', maxWidth: '520px', padding: '24px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)' }}>
+        <div
+          onClick={() => setShowAddModal(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.65)',
+            backdropFilter: 'blur(3px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: '16px'
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              backgroundColor: 'white',
+              borderRadius: '14px',
+              width: '100%',
+              maxWidth: '540px',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              padding: '24px',
+              boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
+              border: '1px solid #e2e8f0'
+            }}
+          >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <h3 style={{ fontSize: '1.15rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <HeartPulse size={20} color="#dc2626" /> Create Emergency Relief Request
               </h3>
-              <button onClick={() => setShowAddModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
-                <X size={18} />
+              <button
+                type="button"
+                onClick={() => setShowAddModal(false)}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  border: '1px solid #cbd5e1',
+                  background: '#f8fafc',
+                  cursor: 'pointer',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  color: '#475569'
+                }}
+              >
+                <X size={16} />
+                <span>Close</span>
               </button>
             </div>
 
@@ -587,106 +667,223 @@ export default function ReliefRequests({ onNavigate }) {
         </div>
       )}
 
-      {/* Drone Assignment Result Modal */}
+      {/* Drone Assignment Result Modal (With Guaranteed Visible Close Options) */}
       {showAssignModal && assigningRequest && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '16px' }}>
-          <div style={{ backgroundColor: 'white', borderRadius: '12px', width: '100%', maxWidth: '640px', padding: '24px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+        <div
+          onClick={() => setShowAssignModal(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.65)',
+            backdropFilter: 'blur(3px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: '16px'
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              backgroundColor: 'white',
+              borderRadius: '14px',
+              width: '100%',
+              maxWidth: '680px',
+              maxHeight: '88vh',
+              display: 'flex',
+              flexDirection: 'column',
+              boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
+              border: '1px solid #e2e8f0',
+              overflow: 'hidden'
+            }}
+          >
+            {/* Modal Header - Pinned at top */}
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '18px 24px',
+                borderBottom: '1px solid #e2e8f0',
+                backgroundColor: '#f8fafc',
+                flexShrink: 0
+              }}
+            >
               <div>
-                <h3 style={{ fontSize: '1.15rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <h3 style={{ fontSize: '1.15rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px', color: '#0f172a', margin: 0 }}>
                   <Send size={20} color="#2563eb" /> Drone Allocation Engine – {assigningRequest.id}
                 </h3>
-                <span style={{ fontSize: '0.78rem', color: '#64748b' }}>
-                  Target: {getLocationName(assigningRequest.locationId)} | Urgency: {assigningRequest.urgency}
+                <span style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '4px', display: 'block' }}>
+                  Target: <strong>{getLocationName(assigningRequest.locationId)}</strong> | Urgency: <strong>{assigningRequest.urgency}</strong> | Quantity: <strong>{assigningRequest.quantity} units</strong>
                 </span>
               </div>
-              <button onClick={() => setShowAssignModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
-                <X size={18} />
+              <button
+                type="button"
+                onClick={() => setShowAssignModal(false)}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '6px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid #cbd5e1',
+                  backgroundColor: '#ffffff',
+                  color: '#334155',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  fontSize: '0.82rem',
+                  boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+                }}
+                title="Close dialog (or press Esc)"
+              >
+                <X size={16} />
+                <span>Close</span>
               </button>
             </div>
 
-            {assignLoading ? (
-              <p style={{ padding: '24px', textAlign: 'center', color: '#64748b' }}>
-                Evaluating fleet drones (payload capacity, battery buffers, and round-trip flight range)...
-              </p>
-            ) : assignResult ? (
-              <div>
-                <div
-                  style={{
-                    backgroundColor: assignResult.success ? '#f0fdf4' : '#fef2f2',
-                    border: `1px solid ${assignResult.success ? '#bbf7d0' : '#fecaca'}`,
-                    borderRadius: '8px',
-                    padding: '14px',
-                    marginBottom: '16px'
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: assignResult.success ? '#15803d' : '#991b1b', fontWeight: 700, fontSize: '0.9rem', marginBottom: '4px' }}>
-                    {assignResult.success ? <CheckCircle2 size={18} /> : <AlertTriangle size={18} />}
-                    <span>{assignResult.success ? 'Optimal Drone Successfully Selected & Assigned!' : 'Allocation Failed'}</span>
+            {/* Modal Body - Scrollable content area */}
+            <div style={{ padding: '20px 24px', overflowY: 'auto', flex: 1 }}>
+              {assignLoading ? (
+                <div style={{ padding: '36px', textAlign: 'center', color: '#64748b' }}>
+                  <div className="spin" style={{ display: 'inline-block', marginBottom: '12px' }}>
+                    <Send size={28} color="#2563eb" />
                   </div>
-                  <p style={{ fontSize: '0.82rem', color: assignResult.success ? '#166534' : '#b91c1c' }}>
-                    {assignResult.message}
+                  <p style={{ fontWeight: 600, color: '#1e293b' }}>Evaluating Fleet Aircraft...</p>
+                  <p style={{ fontSize: '0.82rem' }}>
+                    Checking payload capacity, battery reserves, round-trip flight distance, and Least Excess Capacity match.
                   </p>
                 </div>
-
-                {assignResult.selectedDrone && (
-                  <div className="card" style={{ padding: '16px', marginBottom: '16px', backgroundColor: '#f8fafc' }}>
-                    <div style={{ fontWeight: 600, fontSize: '0.88rem', marginBottom: '8px', color: '#0f172a' }}>
-                      Assigned Aerial Asset Details:
+              ) : assignResult ? (
+                <div>
+                  <div
+                    style={{
+                      backgroundColor: assignResult.success ? '#f0fdf4' : '#fef2f2',
+                      border: `1px solid ${assignResult.success ? '#bbf7d0' : '#fecaca'}`,
+                      borderRadius: '8px',
+                      padding: '14px',
+                      marginBottom: '16px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: assignResult.success ? '#15803d' : '#991b1b', fontWeight: 700, fontSize: '0.9rem', marginBottom: '4px' }}>
+                      {assignResult.success ? <CheckCircle2 size={18} /> : <AlertTriangle size={18} />}
+                      <span>{assignResult.success ? 'Optimal Drone Successfully Selected & Assigned!' : 'Allocation Failed: No Drone Available'}</span>
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '10px', fontSize: '0.8rem' }}>
-                      <div><strong>Call-Sign:</strong> {assignResult.selectedDrone.name}</div>
-                      <div><strong>ID:</strong> {assignResult.selectedDrone.id}</div>
-                      <div><strong>Airframe:</strong> {assignResult.selectedDrone.droneType}</div>
-                      <div><strong>Max Capacity:</strong> {assignResult.selectedDrone.maxCapacityKg} kg</div>
-                      <div><strong>Battery Level:</strong> {assignResult.selectedDrone.batteryPercentage}%</div>
-                      <div><strong>Max Range:</strong> {assignResult.selectedDrone.maxFlightRangeKm} km</div>
-                    </div>
+                    <p style={{ fontSize: '0.82rem', color: assignResult.success ? '#166534' : '#b91c1c', margin: 0 }}>
+                      {assignResult.message}
+                    </p>
                   </div>
-                )}
 
-                {assignResult.evaluations && assignResult.evaluations.length > 0 && (
-                  <div>
-                    <h5 style={{ fontSize: '0.82rem', fontWeight: 700, color: '#475569', marginBottom: '8px', textTransform: 'uppercase' }}>
-                      Fleet Candidate Evaluation Matrix:
-                    </h5>
-                    <div className="data-table-container">
-                      <table className="data-table" style={{ fontSize: '0.78rem' }}>
-                        <thead>
-                          <tr>
-                            <th>Drone</th>
-                            <th>Status</th>
-                            <th>Capacity Check</th>
-                            <th>Battery Check</th>
-                            <th>Result</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {assignResult.evaluations.map((ev, i) => (
-                            <tr key={i} style={{ backgroundColor: ev.eligible ? '#f0fdf4' : 'transparent' }}>
-                              <td><strong>{ev.drone.name}</strong> ({ev.drone.id})</td>
-                              <td>{ev.drone.status}</td>
-                              <td>{ev.drone.maxCapacityKg} kg (Excess: {ev.excessCapacityKg.toFixed(1)}kg)</td>
-                              <td>{ev.drone.batteryPercentage}% (Req: {ev.requiredBattery}%)</td>
-                              <td>
-                                {ev.eligible ? (
-                                  <span style={{ color: '#16a34a', fontWeight: 700 }}>MATCH (Selected)</span>
-                                ) : (
-                                  <span style={{ color: '#dc2626' }}>{ev.rejectionReason}</span>
-                                )}
-                              </td>
+                  {assignResult.selectedDrone && (
+                    <div className="card" style={{ padding: '16px', marginBottom: '16px', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                      <div style={{ fontWeight: 600, fontSize: '0.88rem', marginBottom: '8px', color: '#0f172a' }}>
+                        Assigned Aerial Asset Details:
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '10px', fontSize: '0.8rem' }}>
+                        <div><strong>Call-Sign:</strong> {assignResult.selectedDrone.name}</div>
+                        <div><strong>ID:</strong> {assignResult.selectedDrone.id}</div>
+                        <div><strong>Airframe:</strong> {assignResult.selectedDrone.droneType}</div>
+                        <div><strong>Max Capacity:</strong> {assignResult.selectedDrone.maxCapacityKg} kg</div>
+                        <div><strong>Battery Level:</strong> {assignResult.selectedDrone.batteryPercentage}%</div>
+                        <div><strong>Max Range:</strong> {assignResult.selectedDrone.maxFlightRangeKm} km</div>
+                      </div>
+                    </div>
+                  )}
+
+                  {assignResult.evaluations && assignResult.evaluations.length > 0 && (
+                    <div>
+                      <h5 style={{ fontSize: '0.82rem', fontWeight: 700, color: '#475569', marginBottom: '8px', textTransform: 'uppercase' }}>
+                        Fleet Candidate Evaluation Matrix ({assignResult.evaluations.length} Aircraft Evaluated):
+                      </h5>
+                      <div className="data-table-container">
+                        <table className="data-table" style={{ fontSize: '0.78rem' }}>
+                          <thead>
+                            <tr>
+                              <th>Drone</th>
+                              <th>Status</th>
+                              <th>Capacity Check</th>
+                              <th>Battery Check</th>
+                              <th>Result</th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                          </thead>
+                          <tbody>
+                            {assignResult.evaluations.map((ev, i) => (
+                              <tr key={i} style={{ backgroundColor: ev.eligible ? '#f0fdf4' : 'transparent' }}>
+                                <td><strong>{ev.drone.name}</strong> ({ev.drone.id})</td>
+                                <td>
+                                  <span style={{ fontWeight: 600, color: ev.drone.status === 'AVAILABLE' ? '#16a34a' : '#d97706' }}>
+                                    {ev.drone.status}
+                                  </span>
+                                </td>
+                                <td>{ev.drone.maxCapacityKg} kg (Excess: {ev.excessCapacityKg.toFixed(1)}kg)</td>
+                                <td>{ev.drone.batteryPercentage}% (Req: {ev.requiredBattery}%)</td>
+                                <td>
+                                  {ev.eligible ? (
+                                    <span style={{ color: '#16a34a', fontWeight: 700 }}>MATCH (Selected)</span>
+                                  ) : (
+                                    <span style={{ color: '#dc2626' }}>{ev.rejectionReason}</span>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
-                  </div>
-                )}
-              </div>
-            ) : null}
+                  )}
+                </div>
+              ) : null}
+            </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '16px' }}>
-              <button className="btn btn-secondary" onClick={() => setShowAssignModal(false)}>Close Inspector</button>
+            {/* Modal Footer - Fixed and ALWAYS visible at bottom */}
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '14px 24px',
+                borderTop: '1px solid #e2e8f0',
+                backgroundColor: '#f8fafc',
+                flexShrink: 0
+              }}
+            >
+              <span style={{ fontSize: '0.76rem', color: '#64748b' }}>
+                Press <kbd style={{ padding: '2px 6px', background: '#e2e8f0', borderRadius: '4px', fontSize: '0.72rem' }}>Esc</kbd> or click outside to close
+              </span>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                {assignResult && !assignResult.success && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={handleRechargeAndRetry}
+                    disabled={assignLoading}
+                    style={{ color: '#2563eb', borderColor: '#bfdbfe', backgroundColor: '#eff6ff' }}
+                  >
+                    <span>⚡ Recharge Fleet &amp; Retry</span>
+                  </button>
+                )}
+                {assignResult && assignResult.success && onNavigate && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => {
+                      setShowAssignModal(false);
+                      onNavigate('deliveries');
+                    }}
+                    style={{ color: '#16a34a', borderColor: '#86efac', backgroundColor: '#f0fdf4' }}
+                  >
+                    <span>Proceed to Deliveries &rarr;</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => setShowAssignModal(false)}
+                  style={{ minWidth: '110px' }}
+                >
+                  Close Inspector
+                </button>
+              </div>
             </div>
           </div>
         </div>

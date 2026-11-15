@@ -1,5 +1,5 @@
-RES-001,Emergency First Aid Kits,FIRST_AID,106,20,kits,1.5,1794680904822
-RES-002,Potable Drinking Water (5L),WATER,85,25,cans,5.0,1794680904822
+RES-001,Emergency First Aid Kits,FIRST_AID,106,10,kits,1.5,1794680904822
+RES-002,Potable Drinking Water (5L),WATER,85,0,cans,5.0,1794680904822
 RES-003,Emergency Food Rations,FOOD,150,0,packs,1.0,1794680904822
-RES-004,Trauma Medicine & Antiseptics,MEDICINES,60,5,boxes,0.8,1794680904822
+RES-004,Trauma Medicine & Antiseptics,MEDICINES,55,5,boxes,0.8,1794680904822
 RES-005,Thermal Emergency Blankets,EMERGENCY_SUPPLIES,200,0,blankets,0.5,1794680904822

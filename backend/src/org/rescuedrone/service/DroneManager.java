@@ -46,6 +46,20 @@ public class DroneManager extends BaseManager<Drone> {
         return false;
     }
 
+    /**
+     * Recharges all drones in the fleet to 100% battery and restores status to AVAILABLE.
+     */
+    public synchronized int rechargeAll() {
+        int count = 0;
+        for (Drone d : list) {
+            d.recharge();
+            d.setStatus(DroneStatus.AVAILABLE);
+            update(d);
+            count++;
+        }
+        return count;
+    }
+
     @Override
     protected Drone parseRecord(String[] tokens) {
         return Drone.fromCsvTokens(tokens);

@@ -135,12 +135,33 @@ public class DroneAllocator {
                     request, null, totalPayloadKg, flightDistanceKm, null);
         }
 
+        // If distance is not custom-specified, resolve real shortest path distance using Dijkstra
+        org.rescuedrone.ds.Graph liveGraph = system.getRouteManager().buildGraph();
+        if (flightDistanceKm <= 0 || flightDistanceKm == 10.0) {
+            String defaultHubId = "LOC-001";
+            DijkstraOptimizer.PathResult pathRes = DijkstraOptimizer.findShortestPath(
+                    liveGraph, defaultHubId, request.getLocationId());
+            if (pathRes != null && pathRes.isFound() && pathRes.getTotalDistanceKm() > 0) {
+                flightDistanceKm = pathRes.getTotalDistanceKm();
+            }
+        }
+
         List<Drone> allDrones = system.getDroneManager().getAll();
         List<CandidateEvaluation> evaluations = new ArrayList<>();
         List<CandidateEvaluation> eligibleCandidates = new ArrayList<>();
 
         for (Drone drone : allDrones) {
-            int requiredBattery = drone.calculateRequiredBattery(flightDistanceKm);
+            double effectiveDistanceKm = flightDistanceKm;
+            if (drone.getCurrentLocationId() != null && !drone.getCurrentLocationId().isEmpty() &&
+                    !drone.getCurrentLocationId().equalsIgnoreCase(request.getLocationId())) {
+                DijkstraOptimizer.PathResult dronePath = DijkstraOptimizer.findShortestPath(
+                        liveGraph, drone.getCurrentLocationId(), request.getLocationId());
+                if (dronePath != null && dronePath.isFound() && dronePath.getTotalDistanceKm() > 0) {
+                    effectiveDistanceKm = dronePath.getTotalDistanceKm();
+                }
+            }
+
+            int requiredBattery = drone.calculateRequiredBattery(effectiveDistanceKm);
             double excessCapacity = drone.getMaxCapacityKg() - totalPayloadKg;
 
             if (drone.getStatus() != DroneStatus.AVAILABLE) {
@@ -156,9 +177,9 @@ public class DroneAllocator {
                 continue;
             }
 
-            if ((flightDistanceKm * 2.0) > drone.getMaxFlightRangeKm()) {
+            if ((effectiveDistanceKm * 2.0) > drone.getMaxFlightRangeKm()) {
                 evaluations.add(new CandidateEvaluation(drone, false,
-                        String.format("Round trip distance (%.1f km) exceeds max range (%.1f km)", flightDistanceKm * 2.0, drone.getMaxFlightRangeKm()),
+                        String.format("Round trip distance (%.1f km) exceeds max range (%.1f km)", effectiveDistanceKm * 2.0, drone.getMaxFlightRangeKm()),
                         excessCapacity, requiredBattery));
                 continue;
             }

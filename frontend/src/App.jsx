@@ -57,13 +57,13 @@ export default function App() {
       case 'locations':
         return <LocationManagement />;
       case 'requests':
-        return <ReliefRequests />;
+        return <ReliefRequests onNavigate={setActiveMenu} />;
       case 'drones':
-        return <DroneManagement />;
+        return <DroneManagement onNavigate={setActiveMenu} />;
       case 'routes':
-        return <RouteOptimization />;
+        return <RouteOptimization onNavigate={setActiveMenu} />;
       case 'deliveries':
-        return <DeliveryManagement />;
+        return <DeliveryManagement onNavigate={setActiveMenu} />;
       case 'resources':
         return <ResourceManagement />;
       case 'reports':

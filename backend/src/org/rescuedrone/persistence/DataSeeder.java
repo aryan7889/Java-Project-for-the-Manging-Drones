@@ -74,7 +74,7 @@ public class DataSeeder {
         records.add(new Drone("DRN-001", "SkyLifter Alpha", 20.0, 95, 45.0, "LOC-001", DroneStatus.AVAILABLE, "Heavy-Lift Hexacopter").toCsvRecord());
         records.add(new Drone("DRN-002", "AeroRelief Beta", 10.0, 75, 30.0, "LOC-001", DroneStatus.AVAILABLE, "Medium Quadcopter").toCsvRecord());
         records.add(new Drone("DRN-003", "SwiftDrop Gamma", 5.0, 100, 60.0, "LOC-001", DroneStatus.AVAILABLE, "Fast Medical VTOL").toCsvRecord());
-        records.add(new Drone("DRN-004", "RescueTitan Delta", 25.0, 40, 50.0, "LOC-001", DroneStatus.MAINTENANCE, "Heavy Cargo Octocopter").toCsvRecord());
+        records.add(new Drone("DRN-004", "RescueTitan Delta", 25.0, 95, 60.0, "LOC-001", DroneStatus.AVAILABLE, "Heavy Cargo Octocopter").toCsvRecord());
         FileManager.writeLines(AppConfig.DRONES_FILE, records);
         System.out.println("[DataSeeder] Seeded default drones.");
     }
@@ -112,7 +112,7 @@ public class DataSeeder {
         long now = System.currentTimeMillis();
         records.add(new ReliefRequest("REQ-001", "LOC-002", "RES-001", 10, UrgencyLevel.CRITICAL, 450,
                 "Urgent trauma kits required immediately", RequestStatus.PENDING, now - 600000, now - 600000).toCsvRecord());
-        records.add(new ReliefRequest("REQ-002", "LOC-005", "RES-002", 15, UrgencyLevel.CRITICAL, 320,
+        records.add(new ReliefRequest("REQ-002", "LOC-005", "RES-002", 4, UrgencyLevel.CRITICAL, 320,
                 "Drinking water needed as ground wells submerged", RequestStatus.PENDING, now - 500000, now - 500000).toCsvRecord());
         records.add(new ReliefRequest("REQ-003", "LOC-003", "RES-004", 5, UrgencyLevel.HIGH, 280,
                 "Antibiotics and trauma dressings needed for landslide injured", RequestStatus.PENDING, now - 400000, now - 400000).toCsvRecord());

@@ -183,8 +183,17 @@ public class RequestHandler implements HttpHandler {
 
         org.rescuedrone.algorithm.DroneAllocator.AllocationResult result =
                 org.rescuedrone.algorithm.DroneAllocator.evaluateAndAssign(requestId, distance);
-        int statusCode = result.isSuccess() ? 200 : 400;
-        CorsHandler.sendJsonResponse(exchange, statusCode, result);
+
+        if (result.isSuccess() && result.getSelectedDrone() != null) {
+            try {
+                org.rescuedrone.service.DeliveryService.getInstance().createDeliveryForAssignedRequest(
+                        result.getRequest(), result.getSelectedDrone(), result.getFlightDistanceKm());
+            } catch (Exception ex) {
+                System.err.println("[RequestHandler] Error auto-creating delivery record: " + ex.getMessage());
+            }
+        }
+
+        CorsHandler.sendJsonResponse(exchange, 200, result);
     }
 
     private void handlePut(HttpExchange exchange, String path) throws IOException {
